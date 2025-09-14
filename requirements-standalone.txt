@@ -1,0 +1,5 @@
+# Requirements for the standalone cisco_gps_netconf.py script
+ncclient>=0.6.13
+xmltodict>=0.12.0
+lxml>=4.6.0
+

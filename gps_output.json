@@ -1,0 +1,11 @@
+{
+  "latitude": "50.61233127777778",
+  "latitude_dms": "50\u00b0 36' 44.3926\" N",
+  "longitude": "5.586715583333333",
+  "longitude_dms": "5\u00b0 35' 12.1761\" E",
+  "altitude": "70 meters",
+  "hdop": "0.7",
+  "timestamp": "Sun Sep 14 08:35:14 2025",
+  "fix_type": "2D",
+  "gps_status": "GPS coordinates acquired"
+}
