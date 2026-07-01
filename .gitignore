@@ -134,6 +134,13 @@ dmypy.json
 *.swp
 *.swo
 
-# Project specific
+# Project specific — local run output (may contain device coordinates)
 gps_coordinates.json
+gps_output.json
+gps_all_sources.json
+gps_verify.json
+gps_cellular.json
+cellular_data.json
+complete_cellular_data.json
+example_gps_data.json
 *.log

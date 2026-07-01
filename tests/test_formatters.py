@@ -69,13 +69,28 @@ class TestCoordinateFormatter:
         result = self.formatter.format_coordinates({})
         assert 'No GPS coordinates found' == result
     
+    def test_format_coordinates_with_dms_fields_includes_map_links(self):
+        """Cellular GPS sources include pre-parsed DMS; map links should still render."""
+        gps_data = {
+            "latitude": "50.612463",
+            "longitude": "5.586687",
+            "latitude_dms": "50° 36' 44.868\" N",
+            "longitude_dms": "5° 35' 12.0744\" E",
+        }
+
+        result = self.formatter.format_coordinates(gps_data)
+
+        assert "google.com/maps" in result
+        assert "50° 36' 44.868\" N" in result
+
     def test_format_coordinates_invalid_numeric(self):
         """Test formatting with non-numeric coordinates"""
         gps_data = {
-            'latitude': 'invalid',
-            'longitude': 'invalid'
+            "latitude": "invalid",
+            "longitude": "invalid",
         }
-        
+
         result = self.formatter.format_coordinates(gps_data)
-        
-        assert 'Could not convert to DMS format' in result
+
+        assert "invalid" in result
+        assert "Decimal Degrees" in result

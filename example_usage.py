@@ -14,11 +14,12 @@ def main():
     
     # Router connection details
     router_config = {
-        "host": "192.168.1.1",      # Replace with your router's IP
-        "port": 830,                # NETCONF port
-        "username": "admin",        # Replace with your username
-        "password": "password",     # Replace with your password
-        "timeout": 30               # Connection timeout in seconds
+        "host": "192.168.2.191",
+        "port": 830,
+        "username": "netconf_user",
+        "password": "<password>",
+        "timeout": 30,
+        "interfaces": ["Cellular0/4/0", "Cellular0/5/0"],
     }
     
     print("Cisco GPS NETCONF Retrieval Example")
@@ -30,20 +31,15 @@ def main():
         
         # Retrieve and display GPS coordinates
         print(f"Connecting to router at {router_config['host']}...")
-        gps_data = gps_retriever.retrieve_and_display_gps(
+        sources = gps_retriever.retrieve_and_display_gps(
             output_file="example_gps_data.json"
         )
-        
-        # Additional processing of GPS data
-        if gps_data:
+
+        if sources:
             print("\n" + "=" * 40)
-            print("SUCCESS: GPS coordinates retrieved!")
-            print(f"Latitude: {gps_data.get('latitude', 'N/A')}")
-            print(f"Longitude: {gps_data.get('longitude', 'N/A')}")
-            if 'altitude' in gps_data:
-                print(f"Altitude: {gps_data['altitude']}")
-            if 'accuracy' in gps_data:
-                print(f"Accuracy: {gps_data['accuracy']}")
+            print(f"SUCCESS: {len(sources)} GPS source(s) retrieved!")
+            for source_id, gps_data in sources.items():
+                print(f"  {source_id}: {gps_data.get('latitude')}, {gps_data.get('longitude')}")
         
     except CiscoGPSError as e:
         print(f"\nGPS Error: {e}")

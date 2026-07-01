@@ -1,347 +1,360 @@
 # Cisco GPS NETCONF Retrieval Tool
 
-A standalone Python script for retrieving GPS coordinates and cellular radio information from Cisco routers using the NETCONF protocol. This tool supports multiple Cisco router platforms and YANG models, providing GPS coordinates and cellular data in human-readable formats.
+Retrieve GPS coordinates and cellular radio metrics from Cisco IOS XE routers using NETCONF — no SSH/CLI fallback required.
+
+Tested on a **Cisco IR1835** (IOS XE 26.02) with three independent GPS sources: platform GNSS/GPS/DR module and two cellular interfaces.
 
 ## Features
 
-- **Multi-platform Support**: Works with IOS XE, IOS XR, and Nexus platforms
-- **Cellular GPS & Radio Data**: Retrieve both GPS coordinates and cellular radio information
-- **Multiple YANG Models**: Attempts various NETCONF filters to find GPS data
-- **SSH Fallback**: Automatic fallback to SSH CLI commands when NETCONF is limited
-- **Multiple Output Formats**: 
-  - Decimal degrees
-  - Degrees, Minutes, Seconds (DMS)
-  - Map service links (Google Maps, OpenStreetMap, Bing Maps)
-  - Cellular radio metrics (signal strength, band info, cell data)
-- **Robust Error Handling**: Comprehensive error handling and troubleshooting information
-- **JSON Export**: Save GPS and cellular data to JSON files for further processing
-- **Command Line Interface**: Easy-to-use CLI tool
+- **Multi-source GPS** — returns every available GPS source in one run (platform GNSS module + cellular interfaces)
+- **NETCONF-only** — uses IOS XE operational YANG models; no CLI or SSH dependency
+- **Correct YANG models** for IR1800/IR1835-class devices:
+  - `Cisco-IOS-XE-gnss-dr-oper` — platform GNSS/GPS/DR (`show platform hardware gps detail`)
+  - `Cisco-IOS-XE-cellwan-oper` — cellular GPS and radio (`cellwan-gps`, `cellwan-radio`)
+  - `Cisco-IOS-XE-gnss-oper` — slot-based GNSS (queried when present; not populated on IR1835)
+- **DMS parsing** — converts cellular GPS coordinates from NETCONF DMS strings to decimal degrees
+- **Cellular radio metrics** — optional `--cellular` mode for RSSI, RSRP, band, PCI, etc.
+- **Multiple output formats** — decimal degrees, DMS, map links (Google Maps, OpenStreetMap, Bing Maps)
+- **JSON export** — save structured results for automation pipelines
+- **Interface filtering** — limit cellular sources with `--interfaces`
+
+## Requirements
+
+- Python 3.9+ (3.7 declared in packaging; CI tests 3.9+)
+- Cisco router with NETCONF enabled and GPS configured
+- Network access to TCP port **830** (default NETCONF over SSH)
 
 ## Installation
 
-### Download the Script
+### Option A — Run without installing (quick start)
+
 ```bash
-git clone https://github.com/example/cisco-gps-netconf.git
+git clone https://github.com/etychon/cisco-gps-netconf.git
 cd cisco-gps-netconf
-```
-
-### Install Dependencies
-
-#### Option 1: Using Virtual Environment (Recommended)
-```bash
-# Create virtual environment
-python3 -m venv venv
-
-# Activate virtual environment
-source venv/bin/activate
-
-# Install dependencies
-pip install ncclient xmltodict lxml paramiko
-
-# Or use the requirements file
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements-standalone.txt
+python run_cisco_gps_netconf.py --help
 ```
 
-#### Option 2: System-wide Installation
+### Option B — Install as a package
+
 ```bash
-pip install ncclient xmltodict lxml paramiko
-
-# Or use the requirements file
-pip install -r requirements-standalone.txt
+git clone https://github.com/etychon/cisco-gps-netconf.git
+cd cisco-gps-netconf
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+cisco-gps-netconf --help
+# or
+python -m cisco_gps_netconf --help
 ```
 
-**Note:** On some systems (like macOS with Homebrew Python), you may need to use a virtual environment or add `--user` flag to avoid "externally-managed-environment" errors.
+## Router Prerequisites
 
-### Make Script Executable (Optional)
-```bash
-chmod +x cisco_gps_netconf.py
-```
+### Enable NETCONF (IOS XE)
 
-## Prerequisites
-
-### Router Configuration
-
-Enable NETCONF on your Cisco router:
-
-**For IOS XE:**
 ```
 configure terminal
+netconf-yang
 netconf ssh
-username netconf_user privilege 15 secret your_password
+username netconf_user privilege 15 secret <password>
 ip ssh version 2
+end
 ```
 
-**For IOS XR:**
-```
-configure
-netconf agent ssh
-ssh server netconf vrf default
-commit
-```
+Verify: `show netconf-yang statistics`
 
-### GPS Configuration
+### GPS on IR1835 (example)
 
-Ensure GPS is configured on your router:
+**Platform GNSS/GPS/DR module** (IRM-GNSS):
 
-**Basic GPS Configuration:**
 ```
 configure terminal
 gps enable
-gps location latitude 37.7749 longitude -122.4194
+end
 ```
 
-**For Cellular GPS (ISR routers with cellular modules):**
+Verify: `show platform hardware gps detail`
+
+**Cellular GPS** (per modem):
+
 ```
 configure terminal
-interface cellular 0/5/0
+interface Cellular0/4/0
  gps enable
  gps mode standalone
+exit
+interface Cellular0/5/0
+ gps enable
+ gps mode mbased
+end
 ```
+
+Verify: `show cellular 0/4/0 gps` and `show cellular 0/5/0 gps`
 
 ## Usage
 
-### Command Line Interface
+### CLI reference
 
-```bash
-# If using virtual environment, activate it first
-source venv/bin/activate
-
-# Basic GPS usage
-python cisco_gps_netconf.py -H 192.168.1.1 -u admin -p password
-
-# GPS + Cellular radio data (recommended for cellular-enabled routers)
-python cisco_gps_netconf.py -H 192.168.1.1 -u admin -p password --cellular
-
-# With custom port and output file
-python cisco_gps_netconf.py -H router.example.com -u netconf_user -p secret123 -P 2022 --cellular -o cellular_data.json
-
-# With timeout and verbose output
-python cisco_gps_netconf.py -H 10.1.1.1 -u admin -p pass --cellular --timeout 60 -v
-
-# Show help and all options
-python cisco_gps_netconf.py --help
+```
+usage: cisco-gps-netconf [-h] -H HOST -u USERNAME -p PASSWORD [-P PORT]
+                         [-o OUTPUT] [-t TIMEOUT] [-v] [--cellular]
+                         [--interfaces INTERFACES] [--version]
 ```
 
-### Using as a Python Module
+| Flag | Description |
+|------|-------------|
+| `-H`, `--host` | Router IP or hostname (required) |
+| `-u`, `--username` | NETCONF username (required) |
+| `-p`, `--password` | NETCONF password (required) |
+| `-P`, `--port` | NETCONF port (default: 830) |
+| `-o`, `--output` | Write JSON results to file |
+| `-t`, `--timeout` | Connection timeout in seconds (default: 30) |
+| `--cellular` | Include per-interface cellular radio metrics |
+| `--interfaces` | Comma-separated cellular interfaces to include |
+| `-v`, `--verbose` | Print raw result dict after formatted output |
 
-You can also import and use the classes directly in your Python code:
+### Examples (IR1835 lab device)
+
+All GPS sources (GNSS module + all cellular interfaces discovered via NETCONF):
+
+```bash
+python run_cisco_gps_netconf.py -H 192.168.2.191 -u netconf_user -p '<password>'
+```
+
+Limit to two cellular modems (platform GNSS is always included):
+
+```bash
+python run_cisco_gps_netconf.py -H 192.168.2.191 -u netconf_user -p '<password>' \
+  --interfaces Cellular0/4/0,Cellular0/5/0
+```
+
+GPS + cellular radio metrics, save JSON:
+
+```bash
+python run_cisco_gps_netconf.py -H 192.168.2.191 -u netconf_user -p '<password>' \
+  --interfaces Cellular0/4/0,Cellular0/5/0 --cellular -o gps_report.json
+```
+
+### Sample output — all GPS sources
+
+Captured from a Cisco **IR1835** running IOS XE **26.02** with three active fixes:
+
+```
+Connecting to 192.168.2.191:830...
+NETCONF connection established successfully
+Querying GNSS/GPS/DR module (platform hardware GPS)...
+  Found coordinates for GNSS_GPS_DR
+Querying Cellular GPS...
+  Found coordinates for Cellular0/4/0
+  Found coordinates for Cellular0/5/0
+Querying GNSS slot module (gnss-oper)...
+  Cisco-IOS-XE-gnss-oper: no location fix (on IR1835 the platform GNSS module is exposed via gnss-dr-oper)
+============================================================
+GPS COORDINATES RETRIEVED
+Sources: 3
+============================================================
+
+Source: GNSS_GPS_DR
+----------------------------------------
+Type: platform_hardware_gps
+YANG: Cisco-IOS-XE-gnss-dr-oper
+CLI equivalent: show platform hardware gps detail
+Decimal Degrees:
+  Latitude:  50.612892°
+  Longitude: 5.585948°
+Degrees, Minutes, Seconds:
+  Latitude:  50° 36' 46.41" N
+  Longitude: 5° 35' 9.41" E
+Map Links:
+  Google Maps: https://www.google.com/maps?q=50.612892,5.585948
+  ...
+Timestamp: 2026-07-01T09:00:19+00:00
+GPS Status: gps-dr-state-enabled
+
+Source: Cellular0/4/0
+----------------------------------------
+Type: cellular
+YANG: Cisco-IOS-XE-cellwan-oper
+Decimal Degrees:
+  Latitude:  50.612463°
+  Longitude: 5.586687°
+Degrees, Minutes, Seconds:
+  Latitude:  50° 36' 44.868" N
+  Longitude: 5° 35' 12.0744" E
+Map Links:
+  Google Maps: https://www.google.com/maps?q=50.612463,5.586687
+  ...
+Timestamp: 2026-07-01T09:02:50+00:00
+GPS Status: gps-state-enabled
+GPS Mode: gps-mode-standalone
+
+Source: Cellular0/5/0
+----------------------------------------
+Type: cellular
+YANG: Cisco-IOS-XE-cellwan-oper
+Decimal Degrees:
+  Latitude:  50.612531°
+  Longitude: 5.586677°
+...
+GPS Status: gps-state-enabled
+GPS Mode: gps-mode-mbased
+============================================================
+```
+
+### Sample output — `--cellular` (radio metrics)
+
+```
+CELLULAR RADIO INFORMATION (1 interfaces):
+------------------------------
+
+Interface: Cellular0/5/0
+  Power Mode: radio-power-mode-online
+  LTE Band: 7
+  LTE Bandwidth: bandwidth-15-mhz
+  LTE Rx Channel (PCC): 3175
+  LTE Tx Channel (PCC): 21175
+  RSSI: -71 dBm
+  RSRP: -98 dBm
+  RSRQ: -9 dB
+  SNR: 11.2 dB
+  Physical Cell ID: 114
+  RAT Preference: lte-radio-tech-auto
+  RAT Selected: system-mode-lte-fdd
+```
+
+### Python API
 
 ```python
 from cisco_gps_netconf import CiscoGPSRetriever
 
-# Create retriever instance
-gps_retriever = CiscoGPSRetriever(
-    host="192.168.1.1",
-    username="admin",
-    password="password",
-    port=830,
-    timeout=30
+retriever = CiscoGPSRetriever(
+    host="192.168.2.191",
+    username="netconf_user",
+    password="<password>",
+    interfaces=["Cellular0/4/0", "Cellular0/5/0"],
 )
 
-# Retrieve GPS coordinates only
-try:
-    gps_data = gps_retriever.retrieve_and_display_gps(output_file="gps_data.json")
-    print(f"Retrieved GPS data: {gps_data}")
-except Exception as e:
-    print(f"Error: {e}")
+sources = retriever.retrieve_and_display_gps(output_file="gps.json")
+for source_id, data in sources.items():
+    print(source_id, data["latitude"], data["longitude"], data.get("gps_status"))
 
-# Retrieve GPS + cellular radio data
-try:
-    cellular_data = gps_retriever.retrieve_and_display_cellular(output_file="cellular_data.json")
-    print(f"Retrieved cellular data: {cellular_data}")
-except Exception as e:
-    print(f"Error: {e}")
+# GPS + radio metrics
+report = retriever.retrieve_and_display_cellular(output_file="cellular.json")
 ```
 
-## Sample Output
+See also [`example_usage.py`](example_usage.py).
 
-### GPS Only Mode
+## How GPS sources map to NETCONF
+
+| Source ID | Router CLI equivalent | YANG model | NETCONF container |
+|-----------|----------------------|------------|-------------------|
+| `GNSS_GPS_DR` | `show platform hardware gps detail` | `Cisco-IOS-XE-gnss-dr-oper` | `gnss-dr-data` |
+| `Cellular0/x/y` | `show cellular 0/x/y gps` | `Cisco-IOS-XE-cellwan-oper` | `cellwan-gps` |
+| `gnss_oper_slot_*` | `show gnss status` (when present) | `Cisco-IOS-XE-gnss-oper` | `gnss-data` |
+
+On the IR1835, the IRM-GNSS module is exposed through **`gnss-dr-oper`**, not `gnss-oper`. The tool still queries `gnss-oper` for platforms where it is populated.
+
+### Fix status values
+
+| NETCONF state | Meaning |
+|---------------|---------|
+| `gps-dr-state-enabled` | Platform GNSS module has coordinates |
+| `gps-state-enabled` | Cellular GPS has a fix |
+| `gps-state-acquiring` | Cellular GPS still acquiring — coordinates may be stale |
+
+## Project layout
+
 ```
-============================================================
-GPS COORDINATES RETRIEVED
-============================================================
-Decimal Degrees:
-  Latitude:  50.612334°
-  Longitude: 5.586707°
-
-Degrees, Minutes, Seconds:
-  Latitude:  50° 36' 44.40" N
-  Longitude: 5° 35' 12.15" E
-
-Map Links:
-  Google Maps: https://www.google.com/maps?q=50.612334,5.586707
-  OpenStreetMap: https://www.openstreetmap.org/?mlat=50.612334&mlon=5.586707&zoom=15
-  Bing Maps: https://www.bing.com/maps?cp=50.612334~5.586707&lvl=15
-
-Altitude: 70 meters
-HDOP: 0.6
-Timestamp: Sun Sep 14 08:48:44 2025
-Fix Type: 2D
-GPS Status: GPS coordinates acquired
-============================================================
-```
-
-### Cellular Mode (--cellular)
-```
-============================================================
-CELLULAR DATA RETRIEVED
-============================================================
-
-GPS COORDINATES:
---------------------
-Decimal Degrees:
-  Latitude:  50.612334°
-  Longitude: 5.586707°
-
-Degrees, Minutes, Seconds:
-  Latitude:  50° 36' 44.40" N
-  Longitude: 5° 35' 12.15" E
-
-Map Links:
-  Google Maps: https://www.google.com/maps?q=50.612334,5.586707
-  OpenStreetMap: https://www.openstreetmap.org/?mlat=50.612334&mlon=5.586707&zoom=15
-  Bing Maps: https://www.bing.com/maps?cp=50.612334~5.586707&lvl=15
-
-Altitude: 70 meters
-HDOP: 0.6
-Timestamp: Sun Sep 14 08:48:44 2025
-Fix Type: 2D
-GPS Status: GPS coordinates acquired
-
-
-CELLULAR RADIO INFORMATION:
-------------------------------
-Power Mode: Online
-LTE Band: B7
-LTE Bandwidth: 10 MHz
-LTE Rx Channel (PCC): 3175
-LTE Tx Channel (PCC): 21175
-
-Signal Strength:
-  RSSI: -68 dBm
-  RSRP: -93 dBm
-  RSRQ: -13 dB
-  SNR: 15.6 dB
-
-Physical Cell ID: 114
-Number of Nearby Cells: 1
-RAT Preference: AUTO
-RAT Selected: LTE
-============================================================
+cisco-gps-netconf/
+├── run_cisco_gps_netconf.py   # Standalone launcher (adds src/ to path)
+├── src/cisco_gps_netconf/
+│   ├── cli.py                 # Argument parser and entry point
+│   ├── gps_retriever.py       # NETCONF session and multi-source queries
+│   ├── netconf_filters.py     # Subtree filters (tuple format required by ncclient)
+│   ├── parsers.py             # XML parsing, DMS → decimal conversion
+│   └── formatters.py          # Human-readable output
+├── tests/                     # Unit tests with XML fixtures
+└── pyproject.toml
 ```
 
-## Supported Platforms
+## Supported platforms
 
-- **Cisco IOS XE**: ISR 1000, ISR 4000, CSR 1000v, Catalyst 9000 series
-- **Cisco IOS XE with Cellular**: IR1101, IR1800, IR8340, ISR 1835 (cellular GPS and radio data)
-- **Cisco IOS XR**: ASR 9000, NCS series
-- **Cisco Nexus**: 9000 series (limited support)
+| Platform | Status | Notes |
+|----------|--------|-------|
+| **IOS XE — IR1101, IR1800, IR1835, IR8340** | Tested | Cellular + GNSS/DR via `cellwan-oper` and `gnss-dr-oper` |
+| **IOS XE — ISR with cellular** | Expected | Same YANG models as IR series |
+| **IOS XE — CSR, Catalyst** | Partial | Depends on GPS hardware and YANG support |
+| **IOS XR, Nexus** | Not implemented | Filter stubs exist; no retrieval logic yet |
 
+IOS XE NETCONF subtree filters **must** use the `('subtree', '<xml>')` tuple form with ncclient. Raw XML strings alone produce `unknown-element` errors.
 
 ## Troubleshooting
 
-### Common Issues
+| Symptom | Checks |
+|---------|--------|
+| Connection refused | `show netconf-yang statistics`, firewall on TCP 830 |
+| Authentication failed | Privilege-15 user, correct credentials |
+| No GPS sources returned | `show platform hardware gps detail`, `show cellular 0/x/y gps` |
+| Cellular shows `gps-state-acquiring` | Wait for satellite lock; standalone mode can take longer than mbased |
+| `gnss-oper` empty on IR1835 | Expected — use `GNSS_GPS_DR` / `gnss-dr-oper` instead |
+| `unknown-element` NETCONF error | Ensure IOS XE 17.x+ with `netconf-yang`; filters must use subtree tuple |
 
-1. **Connection Failed**
-   - Verify NETCONF is enabled on the router
-   - Check network connectivity and firewall rules
-   - Ensure correct IP address and port
-
-2. **Authentication Failed**
-   - Verify username and password
-   - Check user privileges (should be privilege level 15)
-
-3. **GPS Data Not Found**
-   - Verify GPS is configured and enabled
-   - Check GPS receiver status: `show gps status`
-   - For cellular GPS: `show cellular 0/5/0 gps detail`
-   - Ensure GPS has satellite lock
-
-4. **NETCONF Limitations**
-   - Some routers have limited NETCONF support
-   - Script automatically falls back to SSH CLI commands
-   - Use `--cellular` flag for comprehensive cellular data
-
-### Debug Commands
-
-Run these commands on your router to check GPS status:
+### Useful router commands
 
 ```
-# Standard GPS commands
-show gps status
-show location
-show platform hardware gps status
-
-# Cellular GPS commands
-show cellular 0/5/0 gps detail
+show platform hardware gps detail
+show cellular 0/4/0 gps
+show cellular 0/5/0 gps
 show cellular 0/5/0 radio
-show cellular 0/5/0 network
-
-# NETCONF status
 show netconf-yang statistics
 ```
 
 ## Development
 
-### Setup Development Environment
-
 ```bash
-git clone https://github.com/example/cisco-gps-netconf.git
-cd cisco-gps-netconf
-pip install ncclient xmltodict lxml paramiko
-pip install pytest black mypy  # Optional development tools
+pip install -e ".[dev]"
+make test          # pytest with coverage
+make format        # black
+make lint          # flake8
 ```
 
-### Running Tests
+CI runs on Python 3.9, 3.11, and 3.12 via GitHub Actions.
 
-```bash
-pytest tests/
-```
+## Security
 
-### Code Formatting
-
-```bash
-black cisco_gps_netconf.py
-```
-
-### Type Checking
-
-```bash
-mypy cisco_gps_netconf.py
-```
+See [SECURITY.md](SECURITY.md). JSON output may contain precise location data — handle accordingly.
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch: `git checkout -b feature-name`
-3. Make your changes and add tests
-4. Run tests and ensure they pass
-5. Submit a pull request
+2. Create a feature branch
+3. Add tests for parser/filter changes (XML fixtures preferred)
+4. Run `pytest tests/`
+5. Open a pull request
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Support
-
-For issues and questions:
-- Create an issue on GitHub
-- Check the troubleshooting section in this README
-- Review Cisco documentation for NETCONF and GPS configuration
+MIT — see [LICENSE](LICENSE).
 
 ## Changelog
 
-### v1.1.0 (2024-09-14)
-- Added cellular radio data support with `--cellular` flag
-- Enhanced GPS parsing for DMS format coordinates
-- Improved SSH fallback for routers with limited NETCONF support
-- Added comprehensive cellular metrics (signal strength, band info, cell data)
-- Better error handling and connection management
+### v2.0.0
 
-### v1.0.0 (2024-09-11)
+- NETCONF-only multi-source GPS retrieval (no SSH/CLI fallback)
+- Correct IOS XE YANG models: `cellwan-oper`, `gnss-dr-oper`, `gnss-oper`
+- DMS coordinate parsing from cellular NETCONF XML
+- Platform GNSS source (`GNSS_GPS_DR`) mapped to `show platform hardware gps detail`
+- Per-interface cellular radio metrics via `cellwan-radio`
+- `--interfaces` filter; restructured package under `src/cisco_gps_netconf/`
+- Verified on Cisco IR1835 (IOS XE 26.02)
+
+### v1.1.0
+
+- Cellular radio data (`--cellular`)
+- DMS format parsing improvements
+
+### v1.0.0
+
 - Initial release
-- Support for IOS XE, IOS XR, and Nexus platforms
-- Multiple output formats
-- Command line interface
-- JSON export functionality
-- Comprehensive error handling
