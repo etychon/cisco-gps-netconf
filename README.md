@@ -54,16 +54,53 @@ python -m cisco_gps_netconf --help
 
 ### Enable NETCONF (IOS XE)
 
+NETCONF-YANG rides on SSH (port **830**). Cisco requires a **privilege-15** user and **AAA authentication/authorization** when `aaa new-model` is in use (typical on production devices). See the [Cisco IOS XE NETCONF Programmability Guide](https://www.cisco.com/c/en/us/td/docs/ios-xml/ios/prog/configuration/179/b_179_programmability_cg/m_179_prog_yang_netconf.html).
+
+**Minimum configuration (local AAA):**
+
 ```
 configure terminal
-netconf-yang
-netconf ssh
+!
+! User — privilege 15 is required for NETCONF
 username netconf_user privilege 15 secret <password>
+!
+! AAA — required when aaa new-model is enabled (or will be enabled)
+aaa new-model
+aaa authentication login default local
+aaa authorization exec default local
+!
+! SSH transport for NETCONF (port 830)
 ip ssh version 2
+crypto key generate rsa modulus 2048
+!
+! Enable NETCONF-YANG (initial startup can take up to ~90 seconds)
+netconf-yang
 end
 ```
 
-Verify: `show netconf-yang statistics`
+Verify:
+
+```
+show ip ssh
+show netconf-yang statistics
+show netconf-yang sessions
+```
+
+**Notes:**
+
+- If `aaa new-model` is already configured on the device, you **must** have `aaa authentication login default …` and `aaa authorization exec default …` (or a named list bound to programmatic interfaces — see below). NETCONF logins fail without them.
+- For **TACACS+** or **RADIUS**, replace `local` with your method list (e.g. `group tacacs+ local`). Local and TACACS+ authorization are supported for NETCONF.
+- On IOS XE **17.9.1+**, you may use a **named AAA method list** for programmatic interfaces instead of changing the global `default` lists:
+
+```
+aaa authentication login NETCONF_AUTH local
+aaa authorization exec NETCONF_AUTH local
+yang-interfaces aaa authentication method-list NETCONF_AUTH
+yang-interfaces aaa authorization method-list NETCONF_AUTH
+```
+
+- Use `netconf-yang` (not legacy `netconf ssh`). Disable legacy NETCONF if present: `no netconf legacy`.
+- Optional datastore feature (not required for GPS read-only `get` operations): `netconf-yang feature candidate-datastore`.
 
 ### GPS on IR1835 (example)
 
@@ -295,7 +332,7 @@ IOS XE NETCONF subtree filters **must** use the `('subtree', '<xml>')` tuple for
 | Symptom | Checks |
 |---------|--------|
 | Connection refused | `show netconf-yang statistics`, firewall on TCP 830 |
-| Authentication failed | Privilege-15 user, correct credentials |
+| Authentication failed | Privilege-15 user; verify `aaa authentication login default` and `aaa authorization exec default` (or `yang-interfaces aaa` method-list on 17.9.1+) |
 | No GPS sources returned | `show platform hardware gps detail`, `show cellular 0/x/y gps` |
 | Cellular shows `gps-state-acquiring` | Wait for satellite lock; standalone mode can take longer than mbased |
 | `gnss-oper` empty on IR1835 | Expected — use `GNSS_GPS_DR` / `gnss-dr-oper` instead |
@@ -304,11 +341,15 @@ IOS XE NETCONF subtree filters **must** use the `('subtree', '<xml>')` tuple for
 ### Useful router commands
 
 ```
+show aaa method-lists
+show running-config | section aaa
+show ip ssh
+show netconf-yang statistics
+show netconf-yang sessions
 show platform hardware gps detail
 show cellular 0/4/0 gps
 show cellular 0/5/0 gps
 show cellular 0/5/0 radio
-show netconf-yang statistics
 ```
 
 ## Development
